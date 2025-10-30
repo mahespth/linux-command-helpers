@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LVM Command Builder — extend / shrink / mount / create</title>
+  <style>
+    :root { --bg:#0f172a; --panel:#111827; --muted:#6b7280; --fg:#e5e7eb; --accent:#38bdf8; --ok:#10b981; --warn:#f59e0b; --bad:#ef4444; }
+    html,body{height:100%}
+    body{margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, 'Helvetica Neue', Arial;
+      background:linear-gradient(180deg, #0b1022, #0a0e1b); color:var(--fg)}
+    .wrap{max-width:1100px; margin:2rem auto; padding:0 1rem}
+    .title{font-size:clamp(1.4rem, 2.6vw, 2rem); font-weight:800; letter-spacing:.2px; display:flex; align-items:center; gap:.6rem}
+    .subtitle{color:var(--muted); margin-top:.3rem}
+    .card{background:linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.02)); border:1px solid rgba(255,255,255,.06);
+      box-shadow:0 10px 30px rgba(0,0,0,.35); border-radius:18px; padding:1rem 1rem}
+    .grid{display:grid; gap:1rem}
+    .grid.cols-2{grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));}
+    .grid.cols-3{grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));}
+    label{font-weight:600; font-size:.9rem}
+    .hint{font-size:.8rem; color:var(--muted)}
+    input, select, textarea{width:100%; background:#0b1224; color:var(--fg); border:1px solid rgba(255,255,255,.08);
+      padding:.7rem .8rem; border-radius:12px; outline:none}
+    input:focus, select:focus, textarea:focus{border-color:var(--accent); box-shadow:0 0 0 3px rgba(56,189,248,.2)}
+    .row{display:flex; gap:.6rem; flex-wrap:wrap; align-items:center}
+    .btn{appearance:none; border:1px solid rgba(255,255,255,.12); background:#0a1328; color:var(--fg); padding:.65rem .9rem; border-radius:12px; cursor:pointer; font-weight:700}
+    .btn:hover{border-color:var(--accent)}
+    .btn.primary{background:linear-gradient(180deg, #0ea5e9, #0284c7); border-color:transparent}
+    .btn.ghost{background:transparent}
+    .pill{font-size:.75rem; color:#0b1224; background:var(--accent); padding:.2rem .5rem; border-radius:999px; font-weight:800}
+    .out{white-space:pre; background:#0a0f1f; border:1px dashed rgba(148,163,184,.35); border-radius:14px; padding:1rem; overflow:auto}
+    .section{margin-top:1.2rem}
+    .section h3{margin:.2rem 0 .4rem; font-size:1.05rem}
+    .tag{display:inline-flex; align-items:center; gap:.35rem; font-size:.75rem; color:var(--muted); background:rgba(148,163,184,.12); padding:.25rem .55rem; border-radius:999px; border:1px solid rgba(148,163,184,.2)}
+    .copy{float:right; font-size:.8rem; cursor:pointer; color:var(--accent)}
+    code{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size:.9rem}
+    .warn{color:var(--warn); font-weight:700}
+    .err{color:var(--bad); font-weight:700}
+    details{background:rgba(148,163,184,.06); border:1px solid rgba(148,163,184,.12); border-radius:12px; padding:.6rem .8rem}
+    summary{cursor:pointer; font-weight:700}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="title">🧰 LVM Command Builder <span class="pill">offline-safe</span></div>
+    <div class="subtitle">Enter your VG/LV, filesystem, and mount point. This generates precise commands to <b>create</b>, <b>mount</b>, <b>extend</b>, and <b>shrink</b> where supported.
+      <span class="hint">XFS cannot be shrunk. ext4 can; btrfs can grow/shrink online.</span>
+    </div>
+
+    <div class="card" role="form" aria-label="Inputs">
+      <div class="grid cols-3">
+        <div>
+          <label for="vg">Volume Group (VG)</label>
+          <input id="vg" placeholder="e.g. vgdata" />
+          <div class="hint">Required if you use an LV.</div>
+        </div>
+        <div>
+          <label for="lv">Logical Volume (LV)</label>
+          <input id="lv" placeholder="e.g. lvapps" />
+          <div class="hint">Generates /dev/&lt;vg&gt;/&lt;lv&gt;</div>
+        </div>
+        <div>
+          <label for="fstype">Filesystem type</label>
+          <select id="fstype">
+            <option value="xfs">xfs</option>
+            <option value="ext4">ext4</option>
+            <option value="btrfs">btrfs</option>
+          </select>
+          <div class="hint">Used for mkfs and resize commands</div>
+        </div>
+      </div>
+
+      <div class="grid cols-3" style="margin-top:.5rem">
+        <div>
+          <label for="fslabel">Filesystem label (optional)</label>
+          <input id="fslabel" placeholder="e.g. APPDATA" />
+          <div class="hint">If set, mkfs -L and /dev/disk/by-label/&lt;label&gt;</div>
+        </div>
+        <div>
+          <label for="mount">Mount point</label>
+          <input id="mount" placeholder="e.g. /srv/appdata" />
+        </div>
+        <div>
+          <label for="pvdevs">PV device(s)</label>
+          <input id="pvdevs" placeholder="e.g. /dev/sdb /dev/sdc" />
+          <div class="hint">Used for pvcreate/vgcreate and vgextend</div>
+        </div>
+      </div>
+
+      <div class="grid cols-3" style="margin-top:.5rem">
+        <div>
+          <label for="lvsize">LV create size</label>
+          <input id="lvsize" placeholder="e.g. 100G" />
+        </div>
+        <div>
+          <label for="grow">Grow by</label>
+          <input id="grow" placeholder="e.g. +50G" />
+          <div class="hint">Use +N or -N (btrfs supports -N)</div>
+        </div>
+        <div>
+          <label for="shrinkTo">Shrink to</label>
+          <input id="shrinkTo" placeholder="e.g. 80G (ext4/btrfs)" />
+        </div>
+      </div>
+
+      <div class="row" style="margin-top:.8rem">
+        <button class="btn primary" id="build">Build commands</button>
+        <button class="btn ghost" id="reset">Reset</button>
+        <span class="hint">Commands appear below. Click the 📋 to copy each block.</span>
+      </div>
+    </div>
+
+    <div id="output" class="section"></div>
+
+    <div class="section">
+      <details>
+        <summary>Notes & safety</summary>
+        <ul>
+          <li>Replace sizes with what fits your disk layout. For LVM reduce on ext4, unmount and <code>fsck</code> before shrinking.</li>
+          <li><strong>XFS cannot be shrunk</strong>. To reduce, create a new (smaller) LV, copy data (e.g. with <code>rsync -aHAX</code>), then switch mounts.</li>
+          <li><code>-r/--resizefs</code> on <code>lvextend</code> is convenient but may call <code>fsadm</code>; explicit filesystem commands are shown too.</li>
+          <li>Use <code>--test</code> flags where available to simulate, and always confirm backups.</li>
+        </ul>
+      </details>
+    </div>
+  </div>
+
+<script>
+function el(id){return document.getElementById(id)}
+function devPath(vg, lv){return (vg && lv) ? `/dev/${vg}/${lv}` : ''}
+function byLabel(label){return label ? `/dev/disk/by-label/${label}` : ''}
+function codeBlock(title, tags, body){
+  const id = `cb_${Math.random().toString(36).slice(2)}`
+  return `
+  <div class="section card">
+    <h3>${title} ${tags.map(t=>`<span class=tag>${t}</span>`).join(' ')}</h3>
+    <a class="copy" data-copy="${id}">📋 Copy</a>
+    <pre class="out"><code id="${id}">${body.replace(/[<>&]/g, m=>({"<":"&lt;", ">":"&gt;", "&":"&amp;"}[m]))}</code></pre>
+  </div>`
+}
+
+function buildCommands(){
+  const vg = el('vg').value.trim()
+  const lv = el('lv').value.trim()
+  const fstype = el('fstype').value
+  const fslabel = el('fslabel').value.trim()
+  const mnt = el('mount').value.trim() || '/mnt/point'
+  const pvdevs = el('pvdevs').value.trim()
+  const lvsize = el('lvsize').value.trim() || '20G'
+  const grow = el('grow').value.trim() || '+10G'
+  const shrinkTo = el('shrinkTo').value.trim()
+
+  const device = devPath(vg, lv) || byLabel(fslabel) || '/dev/mapper/VG-LV'
+
+  const blocks = []
+
+  // Discover
+  blocks.push(codeBlock('Discover LVM and block devices', ['safe'], [
+    'lsblk -f',
+    'pvs; vgs; lvs -a -o +devices',
+    `blkid ${device !== '' ? device : ''}`.trim()
+  ].join('\n')))
+
+  // Create PV/VG/LV
+  if (pvdevs || (vg && lv)){
+    const pvlist = pvdevs || '/dev/sdb'
+    const make = [
+      `# Create PV(s)`,
+      `sudo pvcreate ${pvlist}`,
+      `# Create VG`,
+      `sudo vgcreate ${vg || 'vgdata'} ${pvlist}`,
+      `# Create LV`,
+      `sudo lvcreate -n ${lv || 'lvdata'} -L ${lvsize} ${vg || 'vgdata'}`
+    ].join('\n')
+    blocks.push(codeBlock('Create PV / VG / LV', ['provision'], make))
+  }
+
+  // Make filesystem
+  let mkfs = ''
+  const mkLabel = fslabel ? ` -L ${fslabel}` : ''
+  if (fstype === 'xfs') mkfs = `sudo mkfs.xfs${mkLabel} ${device}`
+  if (fstype === 'ext4') mkfs = `sudo mkfs.ext4${mkLabel} ${device}`
+  if (fstype === 'btrfs') mkfs = `sudo mkfs.btrfs${mkLabel} ${device}`
+  blocks.push(codeBlock('Create filesystem', [fstype], mkfs))
+
+  // Mount + fstab
+  const fstab = [
+    `sudo mkdir -p ${mnt}`,
+    `UUID=$(blkid -s UUID -o value ${device})`,
+    `echo "UUID=$UUID  ${mnt}  ${fstype}  defaults  0  0" | sudo tee -a /etc/fstab`,
+    `sudo mount ${mnt}`,
+    `# verify`,
+    'findmnt -no TARGET,SOURCE,FSTYPE,OPTIONS ' + mnt
+  ].join('\n')
+  blocks.push(codeBlock('Mount and persist in /etc/fstab', ['mount'], fstab))
+
+  // Grow (online where possible)
+  const growLvm = vg && lv
+  let growBody = ''
+  if (growLvm){
+    if (fstype === 'xfs'){
+      growBody = [
+        `# Extend LV by ${grow}`,
+        `sudo lvextend -L ${grow} ${device}`,
+        `# Grow XFS online (needs mountpoint)`,
+        `sudo xfs_growfs ${mnt}`,
+      ].join('\n')
+    } else if (fstype === 'ext4'){
+      growBody = [
+        `# Extend LV by ${grow} and resize filesystem`,
+        `sudo lvextend -L ${grow} ${device}`,
+        `sudo resize2fs ${device}`,
+      ].join('\n')
+    } else if (fstype === 'btrfs'){
+      growBody = [
+        `# Extend LV by ${grow}`,
+        `sudo lvextend -L ${grow} ${device}`,
+        `# Grow btrfs online`,
+        `sudo btrfs filesystem resize max ${mnt}`,
+      ].join('\n')
+    }
+    growBody += '\n# one-liner alternative (if fsadm available):\n' + `sudo lvextend -r -L ${grow} ${device}`
+    blocks.push(codeBlock('Extend LV + filesystem (online)', ['grow'], growBody))
+  } else {
+    // Non-LVM grow for btrfs (if on raw block)
+    if (fstype === 'btrfs'){
+      blocks.push(codeBlock('Grow btrfs (no LVM)', ['grow'], `sudo btrfs filesystem resize ${grow || '+10G'} ${mnt}`))
+    }
+  }
+
+  // Shrink
+  if (fstype === 'ext4' && shrinkTo){
+    const s = [
+      '# EXT4 shrink — offline & careful',
+      `sudo umount ${mnt}`,
+      `sudo e2fsck -f ${device}`,
+      `sudo resize2fs ${device} ${shrinkTo}`,
+      `sudo lvreduce -L ${shrinkTo} ${device}`,
+      `sudo e2fsck -f ${device}`,
+      `sudo mount ${mnt}`,
+    ].join('\n')
+    blocks.push(codeBlock('Shrink ext4 + reduce LV', ['shrink','offline'], s))
+  } else if (fstype === 'xfs' && shrinkTo){
+    const s = [
+      '# XFS cannot be shrunk. Recommended migration path:',
+      `sudo lvcreate -n ${lv || 'lvnew'} -L ${shrinkTo} ${vg || 'vgdata'}`,
+      `sudo mkfs.xfs ${devPath(vg || 'vgdata', (lv || 'lvnew'))}`,
+      `sudo mount ${devPath(vg || 'vgdata', (lv || 'lvnew'))} /mnt/new`,
+      `sudo rsync -aHAX ${mnt}/ /mnt/new/`,
+      `# switch mounts and remove old LV when satisfied`,
+    ].join('\n')
+    blocks.push(codeBlock('Shrink XFS — migrate to smaller LV', ['shrink','advice'], s))
+  } else if (fstype === 'btrfs' && (shrinkTo || /[-+]/.test(grow))){
+    const amt = shrinkTo || '-10G'
+    const s = [
+      '# btrfs allows online shrink/grow of the filesystem',
+      `sudo btrfs filesystem resize ${amt} ${mnt}`,
+      '# If reducing the LV too: unmount, then lvreduce after ensuring used space < new size'
+    ].join('\n')
+    blocks.push(codeBlock('Shrink/Grow btrfs (online)', ['shrink','grow'], s))
+  }
+
+  // VG extend
+  if (pvdevs){
+    const vgs = [
+      `sudo pvcreate ${pvdevs}`,
+      `sudo vgextend ${vg || 'vgdata'} ${pvdevs}`
+    ].join('\n')
+    blocks.push(codeBlock('Add disk(s) to VG', ['capacity'], vgs))
+  }
+
+  // Snapshot
+  if (vg && lv){
+    const snap = [
+      '# LVM snapshot (copy-on-write)',
+      `sudo lvcreate -s -n ${lv}-snap -L 10G ${device}`,
+      `# mount snapshot read-only`,
+      `sudo mount -o ro ${devPath(vg, lv)}-snap /mnt/snap`
+    ].join('\n')
+    blocks.push(codeBlock('LVM snapshot (optional)', ['backup'], snap))
+  }
+
+  // FS check
+  const check = [
+    (fstype==='xfs'? `sudo xfs_repair -n ${device}  # -n = no modify\n` : ''),
+    (fstype==='ext4'? `sudo e2fsck -f ${device}\n` : ''),
+    (fstype==='btrfs'? `sudo btrfs check --readonly ${device}\n` : '')
+  ].join('').trim()
+  if (check) blocks.push(codeBlock('Filesystem check (as needed)', ['health'], check))
+
+  el('output').innerHTML = blocks.join('\n')
+
+  // hook copy buttons
+  document.querySelectorAll('[data-copy]').forEach(a=>{
+    a.onclick = async (e)=>{
+      const id = e.currentTarget.getAttribute('data-copy')
+      const text = document.getElementById(id).innerText
+      try{ await navigator.clipboard.writeText(text); a.textContent='✅ Copied'; setTimeout(()=>a.textContent='📋 Copy', 1200)}catch(err){ a.textContent='❌ Copy failed'; setTimeout(()=>a.textContent='📋 Copy', 1200)}
+    }
+  })
+}
+
+el('build').addEventListener('click', buildCommands)
+
+el('reset').addEventListener('click', ()=>{
+  ['vg','lv','fslabel','mount','pvdevs','lvsize','grow','shrinkTo'].forEach(id=>el(id).value='')
+  el('fstype').value='xfs'
+  el('output').innerHTML=''
+})
+
+// Build defaults initially for quick demo
+buildCommands()
+</script>
+</body>
+</html>

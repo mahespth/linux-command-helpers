@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RAID (mdadm) Command Builder by Steve Maher</title>
+  <style>
+    :root { --bg:#0f172a; --panel:#111827; --muted:#6b7280; --fg:#e5e7eb; --accent:#38bdf8; --ok:#10b981; --warn:#f59e0b; --bad:#ef4444; }
+    html,body{height:100%}
+    body{margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, 'Helvetica Neue', Arial;
+      background:linear-gradient(180deg, #0b1022, #0a0e1b); color:var(--fg)}
+    .wrap{max-width:1100px; margin:2rem auto; padding:0 1rem}
+    .title{font-size:clamp(1.4rem, 2.6vw, 2rem); font-weight:800; letter-spacing:.2px; display:flex; align-items:center; gap:.6rem}
+    .subtitle{color:var(--muted); margin-top:.3rem}
+    .card{background:linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.02)); border:1px solid rgba(255,255,255,.06);
+      box-shadow:0 10px 30px rgba(0,0,0,.35); border-radius:18px; padding:1rem 1rem}
+    .grid{display:grid; gap:1rem}
+    .grid.cols-2{grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));}
+    .grid.cols-3{grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));}
+    label{font-weight:600; font-size:.9rem}
+    .hint{font-size:.8rem; color:var(--muted)}
+    input, select, textarea{width:100%; background:#0b1224; color:var(--fg); border:1px solid rgba(255,255,255,.08);
+      padding:.7rem .8rem; border-radius:12px; outline:none}
+    input:focus, select:focus, textarea:focus{border-color:var(--accent); box-shadow:0 0 0 3px rgba(56,189,248,.2)}
+    .row{display:flex; gap:.6rem; flex-wrap:wrap; align-items:center}
+    .btn{appearance:none; border:1px solid rgba(255,255,255,.12); background:#0a1328; color:var(--fg); padding:.65rem .9rem; border-radius:12px; cursor:pointer; font-weight:700}
+    .btn:hover{border-color:var(--accent)}
+    .btn.primary{background:linear-gradient(180deg, #0ea5e9, #0284c7); border-color:transparent}
+    .btn.ghost{background:transparent}
+    .pill{font-size:.75rem; color:#0b1224; background:var(--accent); padding:.2rem .5rem; border-radius:999px; font-weight:800}
+    .out{white-space:pre; background:#0a0f1f; border:1px dashed rgba(148,163,184,.35); border-radius:14px; padding:1rem; overflow:auto}
+    .section{margin-top:1.2rem}
+    .section h3{margin:.2rem 0 .4rem; font-size:1.05rem}
+    .tag{display:inline-flex; align-items:center; gap:.35rem; font-size:.75rem; color:var(--muted); background:rgba(148,163,184,.12); padding:.25rem .55rem; border-radius:999px; border:1px solid rgba(148,163,184,.2)}
+    .copy{float:right; font-size:.8rem; cursor:pointer; color:var(--accent)}
+    code{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size:.9rem}
+    details{background:rgba(148,163,184,.06); border:1px solid rgba(148,163,184,.12); border-radius:12px; padding:.6rem .8rem}
+    summary{cursor:pointer; font-weight:700}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="title">🧱 RAID (mdadm) Command Builder by Steve Maher<span class="pill">create • assemble • grow • replace</span></div>
+    <div class="subtitle">Enter your array details and disks. Generates ready-to-run commands for creating, assembling, monitoring, growing, replacing disks, and mounting filesystems on Linux software RAID.</div>
+
+    <div class="card" role="form" aria-label="Inputs">
+      <div class="grid cols-3">
+        <div>
+          <label for="md">Array device</label>
+          <input id="md" placeholder="e.g. /dev/md0" />
+          <div class="hint">Use persistent names like /dev/md/raid1data if udev rule exists.</div>
+        </div>
+        <div>
+          <label for="level">RAID level</label>
+          <select id="level">
+            <option>1</option>
+            <option>0</option>
+            <option>5</option>
+            <option>6</option>
+            <option>10</option>
+          </select>
+        </div>
+        <div>
+          <label for="chunk">Chunk size</label>
+          <input id="chunk" placeholder="e.g. 256K" />
+          <div class="hint">Typical: 64K–512K (ignored for RAID1)</div>
+        </div>
+      </div>
+
+      <div class="grid cols-3" style="margin-top:.5rem">
+        <div>
+          <label for="devices">Member devices</label>
+          <input id="devices" placeholder="/dev/disk/by-id/… /dev/disk/by-id/…" />
+          <div class="hint">Prefer /dev/disk/by-id/* (or use partitions like /dev/sdb1)</div>
+        </div>
+        <div>
+          <label for="spares">Spare disks</label>
+          <input id="spares" placeholder="e.g. 1 (optional)" />
+        </div>
+        <div>
+          <label for="meta">Metadata</label>
+          <select id="meta">
+            <option value="1.2">1.2 (default)</option>
+            <option value="1.0">1.0 (bootable)</option>
+            <option value="0.90">0.90 (legacy)</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="grid cols-3" style="margin-top:.5rem">
+        <div>
+          <label for="fstype">Filesystem</label>
+          <select id="fstype">
+            <option value="xfs">xfs</option>
+            <option value="ext4">ext4</option>
+            <option value="btrfs">btrfs</option>
+          </select>
+        </div>
+        <div>
+          <label for="fslabel">FS label</label>
+          <input id="fslabel" placeholder="e.g. RAIDDATA" />
+        </div>
+        <div>
+          <label for="mount">Mount point</label>
+          <input id="mount" placeholder="e.g. /srv/data" />
+        </div>
+      </div>
+
+      <div class="grid cols-3" style="margin-top:.5rem">
+        <div>
+          <label for="name">Array name (for mdadm.conf)</label>
+          <input id="name" placeholder="e.g. md0" />
+          <div class="hint">NAME in mdadm.conf (Hostname:Name)</div>
+        </div>
+        <div>
+          <label for="bitmap">Write-intent bitmap</label>
+          <select id="bitmap">
+            <option value="internal">internal</option>
+            <option value="none">none</option>
+          </select>
+        </div>
+        <div>
+          <label for="email">Alert email (monitor)</label>
+          <input id="email" placeholder="ops@example.com" />
+        </div>
+      </div>
+
+      <div class="row" style="margin-top:.8rem">
+        <button class="btn primary" id="build">Build commands</button>
+        <button class="btn ghost" id="reset">Reset</button>
+        <span class="hint">Commands appear below. Click the 📋 to copy.</span>
+      </div>
+    </div>
+
+    <div id="output" class="section"></div>
+
+    <div class="section">
+      <details>
+        <summary>Notes & safety</summary>
+        <ul>
+          <li>RAID is <b>not</b> backup. Keep tested off-machine backups.</li>
+          <li>Use <code>/dev/disk/by-id/*</code> to avoid device renumbering issues.</li>
+          <li>Create aligned partitions with type <code>fd00</code> (Linux RAID) when using partitions.</li>
+          <li>After array changes (grow/reshape), monitor with <code>cat /proc/mdstat</code> and <code>mdadm --detail</code>.</li>
+        </ul>
+      </details>
+    </div>
+  </div>
+
+<script>
+function el(id){return document.getElementById(id)}
+function esc(s){return s.replace(/[<>&]/g, m=>({"<":"&lt;", ">":"&gt;", "&":"&amp;"}[m]))}
+function codeBlock(title, tags, body){
+  const id = `cb_${Math.random().toString(36).slice(2)}`
+  return `
+  <div class="section card">
+    <h3>${title} ${tags.map(t=>`<span class=tag>${t}</span>`).join(' ')}</h3>
+    <a class="copy" data-copy="${id}">📋 Copy</a>
+    <pre class="out"><code id="${id}">${esc(body)}</code></pre>
+  </div>`
+}
+
+function build(){
+  const md = el('md').value.trim() || '/dev/md0'
+  const level = el('level').value
+  const chunk = el('chunk').value.trim()
+  const devs = el('devices').value.trim() || '/dev/disk/by-id/DISK_A /dev/disk/by-id/DISK_B'
+  const spares = el('spares').value.trim()
+  const meta = el('meta').value
+  const fstype = el('fstype').value
+  const fslabel = el('fslabel').value.trim()
+  const mnt = el('mount').value.trim() || '/mnt/raid'
+  const name = el('name').value.trim() || 'md0'
+  const bitmap = el('bitmap').value
+  const email = el('email').value.trim() || 'root@localhost'
+
+  const devCount = devs.split(/\s+/).filter(Boolean).length
+
+  const blocks = []
+
+  // Discover
+  blocks.push(codeBlock('Discover existing arrays & disks', ['safe'], [
+    'lsblk -o NAME,SIZE,FSTYPE,TYPE,MOUNTPOINT,MODEL',
+    'cat /proc/mdstat',
+    'sudo mdadm --detail --scan',
+    devs.split(/\s+/).map(d=>`sudo mdadm --examine ${d} || true`).join('\n')
+  ].join('\n')))
+
+  // Partition template with sgdisk
+  const partTpl = [
+    '# Optional: partition each disk (aligned, type fd00 = Linux RAID)',
+    ...devs.split(/\s+/).map((d,i)=>`sudo sgdisk -n 1:0:0 -t 1:fd00 -c 1:"${name}-${i+1}" ${d}`),
+    '# Use partitions (e.g., /dev/disk/by-id/...-part1) in the create step if you prefer'
+  ].join('\n')
+  blocks.push(codeBlock('(Optional) Partition disks for RAID', ['prep'], partTpl))
+
+  // Create array
+  const create = [
+    `# Create RAID${level} with ${devCount} devices${spares?` and ${spares} spare(s)`:''}`,
+    `sudo mdadm --create ${md} --level=${level} --raid-devices=${devCount}` + (spares?` --spare-devices=${spares}`:'') +
+      (chunk?` --chunk=${chunk}`:'') + ` --metadata=${meta}` + (bitmap!=='none'?` --bitmap=${bitmap}`:'') +
+      ` ${devs}`,
+    '',
+    '# Watch build/sync progress',
+    'watch -n2 cat /proc/mdstat'
+  ].join('\n')
+  blocks.push(codeBlock('Create array', ['provision'], create))
+
+  // Persist config
+  const persist = [
+    '# Record array to mdadm.conf and rebuild initramfs as needed',
+    'sudo mkdir -p /etc/mdadm',
+    'echo "DEVICE partitions" | sudo tee /etc/mdadm/mdadm.conf >/dev/null',
+    'sudo mdadm --detail --scan | sudo tee -a /etc/mdadm/mdadm.conf',
+    'sudo update-initramfs -u || sudo dracut -f || true'
+  ].join('\n')
+  blocks.push(codeBlock('Persist to /etc/mdadm/mdadm.conf', ['persist'], persist))
+
+  // Make filesystem
+  const devForFs = md
+  const mkLabel = fslabel ? ` -L ${fslabel}` : ''
+  let mkfs = ''
+  if (fstype==='xfs') mkfs = `sudo mkfs.xfs${mkLabel} ${devForFs}`
+  if (fstype==='ext4') mkfs = `sudo mkfs.ext4${mkLabel} ${devForFs}`
+  if (fstype==='btrfs') mkfs = `sudo mkfs.btrfs${mkLabel} ${devForFs}`
+  blocks.push(codeBlock('Create filesystem', [fstype], mkfs))
+
+  // Mount + fstab
+  const fstab = [
+    `sudo mkdir -p ${mnt}`,
+    `UUID=$(blkid -s UUID -o value ${devForFs})`,
+    `echo "UUID=$UUID  ${mnt}  ${fstype}  defaults  0  0" | sudo tee -a /etc/fstab`,
+    `sudo mount ${mnt}`,
+    'findmnt -no TARGET,SOURCE,FSTYPE,OPTIONS ' + mnt
+  ].join('\n')
+  blocks.push(codeBlock('Mount and persist in /etc/fstab', ['mount'], fstab))
+
+  // Assemble existing array
+  const assemble = [
+    '# Assemble on boot or after replug',
+    `sudo mdadm --assemble --scan`,
+    '# Or explicit:',
+    `sudo mdadm --assemble ${md} ${devs}`,
+    'cat /proc/mdstat',
+  ].join('\n')
+  blocks.push(codeBlock('Assemble existing array', ['assemble'], assemble))
+
+  // Grow / reshape
+  const grow = [
+    '# Add a new disk and grow (example adds /dev/disk/by-id/NEW)',
+    `sudo mdadm --add ${md} /dev/disk/by-id/NEW`,
+    `sudo mdadm --grow ${md} --raid-devices=$(( ${devCount} + 1 ))`,
+    'watch -n2 cat /proc/mdstat',
+    '',
+    '# Replace a failed device',
+    `sudo mdadm --fail ${md} /dev/disk/by-id/FAILED && sudo mdadm --remove ${md} /dev/disk/by-id/FAILED`,
+    `sudo mdadm --add ${md} /dev/disk/by-id/REPLACEMENT`,
+  ].join('\n')
+  blocks.push(codeBlock('Grow / replace / repair', ['ops'], grow))
+
+  // Check & scrub
+  const check = [
+    '# Health and details',
+    `sudo mdadm --detail ${md}`,
+    'cat /proc/mdstat',
+    '',
+    '# Monthly scrub (example using systemd timer)',
+    'sudo systemctl enable --now mdmonitor.service || true',
+    'echo check | sudo tee /sys/block/$(basename ' + md + ')/md/sync_action'
+  ].join('\n')
+  blocks.push(codeBlock('Check & scrub', ['health'], check))
+
+  // Monitor & alerts
+  const monitor = [
+    '# mdadm monitoring with email alerts',
+    `echo "MAILADDR ${email}" | sudo tee /etc/mdadm/mdadm.conf >/dev/null`,
+    'sudo mdadm --detail --scan | sudo tee -a /etc/mdadm/mdadm.conf',
+    'sudo systemctl enable --now mdadm --quiet || sudo systemctl enable --now mdmonitor || true'
+  ].join('\n')
+  blocks.push(codeBlock('Monitor (email alerts)', ['alerts'], monitor))
+
+  // Remove / stop
+  const remove = [
+    '# Stop and remove array (DANGEROUS)',
+    'sudo umount ' + mnt,
+    'sudo mdadm --stop ' + md,
+    devs.split(/\s+/).map(d=>`sudo mdadm --zero-superblock ${d}`).join('\n'),
+  ].join('\n')
+  blocks.push(codeBlock('Tear down array', ['danger'], remove))
+
+  el('output').innerHTML = blocks.join('\n')
+  document.querySelectorAll('[data-copy]').forEach(a=>{
+    a.onclick = async (e)=>{
+      const id = e.currentTarget.getAttribute('data-copy')
+      const text = document.getElementById(id).innerText
+      try{ await navigator.clipboard.writeText(text); a.textContent='✅ Copied'; setTimeout(()=>a.textContent='📋 Copy', 1200)}catch(err){ a.textContent='❌ Copy failed'; setTimeout(()=>a.textContent='📋 Copy', 1200)}
+    }
+  })
+}
+
+el('build').addEventListener('click', build)
+
+el('reset').addEventListener('click', ()=>{
+  ['md','chunk','devices','spares','fslabel','mount','name','email'].forEach(id=>el(id).value='')
+  el('level').value='1'
+  el('meta').value='1.2'
+  el('fstype').value='xfs'
+  el('bitmap').value='internal'
+  el('output').innerHTML=''
+})
+
+// Build defaults initially
+build()
+</script>
+</body>
+</html>

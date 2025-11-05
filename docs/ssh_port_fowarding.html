@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SSH Port-Forward & Jump Command Builder — multi-hop by Steve Maher</title>
+  <style>
+    :root { --bg:#0f172a; --panel:#111827; --muted:#6b7280; --fg:#e5e7eb; --accent:#38bdf8; --ok:#10b981; --warn:#f59e0b; --bad:#ef4444; }
+    html,body{height:100%}
+    body{margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, 'Helvetica Neue', Arial;
+      background:linear-gradient(180deg, #0b1022, #0a0e1b); color:var(--fg)}
+    .wrap{max-width:1200px; margin:2rem auto; padding:0 1rem}
+    .title{font-size:clamp(1.4rem, 2.6vw, 2rem); font-weight:800; letter-spacing:.2px; display:flex; align-items:center; gap:.6rem}
+    .subtitle{color:var(--muted); margin-top:.3rem}
+    .card{background:linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.02)); border:1px solid rgba(255,255,255,.06);
+      box-shadow:0 10px 30px rgba(0,0,0,.35); border-radius:18px; padding:1rem 1rem}
+    .grid{display:grid; gap:1rem}
+    .grid.cols-2{grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));}
+    .grid.cols-3{grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));}
+    label{font-weight:600; font-size:.9rem}
+    .hint{font-size:.8rem; color:var(--muted)}
+    input, select, textarea{width:100%; background:#0b1224; color:var(--fg); border:1px solid rgba(255,255,255,.08);
+      padding:.7rem .8rem; border-radius:12px; outline:none}
+    textarea{min-height:90px}
+    input:focus, select:focus, textarea:focus{border-color:var(--accent); box-shadow:0 0 0 3px rgba(56,189,248,.2)}
+    .row{display:flex; gap:.6rem; flex-wrap:wrap; align-items:center}
+    .btn{appearance:none; border:1px solid rgba(255,255,255,.12); background:#0a1328; color:var(--fg); padding:.65rem .9rem; border-radius:12px; cursor:pointer; font-weight:700}
+    .btn:hover{border-color:var(--accent)}
+    .btn.primary{background:linear-gradient(180deg, #0ea5e9, #0284c7); border-color:transparent}
+    .btn.ghost{background:transparent}
+    .pill{font-size:.75rem; color:#0b1224; background:var(--accent); padding:.2rem .5rem; border-radius:999px; font-weight:800}
+    .out{white-space:pre; background:#0a0f1f; border:1px dashed rgba(148,163,184,.35); border-radius:14px; padding:1rem; overflow:auto}
+    .section{margin-top:1.2rem}
+    .section h3{margin:.2rem 0 .4rem; font-size:1.05rem}
+    .tag{display:inline-flex; align-items:center; gap:.35rem; font-size:.75rem; color:var(--muted); background:rgba(148,163,184,.12); padding:.25rem .55rem; border-radius:999px; border:1px solid rgba(148,163,184,.2)}
+    .copy{float:right; font-size:.8rem; cursor:pointer; color:var(--accent)}
+    code{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size:.9rem}
+    details{background:rgba(148,163,184,.06); border:1px solid rgba(148,163,184,.12); border-radius:12px; padding:.6rem .8rem}
+    summary{cursor:pointer; font-weight:700}
+    .tests-pass{color:var(--ok); font-weight:700}
+    .tests-fail{color:var(--bad); font-weight:700}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="title">🛠️ SSH Port-Forward & Jump Builder by Steve Maher <span class="pill">multi-hop -J • -L • -R • -D</span></div>
+    <div class="subtitle">Enter a chain of hosts and pick a forward type. Generates commands for <b>local</b> forwards (source→target), <b>remote</b> forwards (target→source), <b>dynamic</b> SOCKS, and one-shot or persistent (autossh). Also outputs an <code>~/.ssh/config</code> snippet.</div>
+
+    <div class="card" role="form" aria-label="Inputs">
+      <div class="grid cols-2">
+        <div>
+          <label for="hops">Host chain (one per line)</label>
+          <textarea id="hops" placeholder="user1@bastion1:22
+user2@bastion2:2222
+user3@target.internal:22"></textarea>
+          <div class="hint">Last line is the <b>final target</b>. Port is optional (default 22). You can omit user.</div>
+        </div>
+        <div>
+          <label for="identity">Identity file (optional)</label>
+          <input id="identity" placeholder="~/.ssh/id_ed25519" />
+          <div class="hint">Applied to all hops unless overridden in config.</div>
+        </div>
+      </div>
+
+      <div class="grid cols-3" style="margin-top:.5rem">
+        <div>
+          <label for="fwdtype">Forward type</label>
+          <select id="fwdtype">
+            <option value="L">Local (-L) — reach target service from <b>local</b></option>
+            <option value="R">Remote (-R) — expose local service on <b>target</b></option>
+            <option value="D">Dynamic (-D) — SOCKS proxy on <b>local</b></option>
+          </select>
+        </div>
+        <div>
+          <label for="localBind">Local bind address:port</label>
+          <input id="localBind" placeholder="127.0.0.1:8080" />
+          <div class="hint">For -L/-D. Use 0.0.0.0:PORT to listen on all interfaces.</div>
+        </div>
+        <div>
+          <label for="remoteDest">Remote destination (host:port)</label>
+          <input id="remoteDest" placeholder="final.target:80" />
+          <div class="hint">For -L: where traffic ultimately goes. For -R: where remote connects back to.</div>
+        </div>
+      </div>
+
+      <div class="grid cols-3" style="margin-top:.5rem">
+        <div>
+          <label for="options">Extra SSH options</label>
+          <input id="options" placeholder="-o ServerAliveInterval=30 -o ExitOnForwardFailure=yes" />
+        </div>
+        <div>
+          <label for="autossh">Autossh (persistent)</label>
+          <select id="autossh">
+            <option value="off">off</option>
+            <option value="on">on</option>
+          </select>
+        </div>
+        <div>
+          <label for="reverseAddr">Remote bind address (for -R)</label>
+          <input id="reverseAddr" placeholder="localhost" />
+          <div class="hint">Use 0.0.0.0 for remote-wide exposure (needs GatewayPorts).</div>
+        </div>
+      </div>
+
+      <div class="row" style="margin-top:.8rem">
+        <button class="btn primary" id="build">Build commands</button>
+        <button class="btn ghost" id="reset">Reset</button>
+        <span class="hint">Commands appear below. Click the 📋 to copy.</span>
+      </div>
+    </div>
+
+    <div id="output" class="section"></div>
+
+    <div class="section">
+      <details>
+        <summary>Notes & safety</summary>
+        <ul>
+          <li>Multi-hop uses <code>-J</code> (ProxyJump). Works with OpenSSH 7.3+.</li>
+          <li>For <b>-R</b>, the final host's sshd may need <code>GatewayPorts yes</code> and <code>AllowTcpForwarding yes</code>.</li>
+          <li>Use <code>-N -T</code> for tunnel-only sessions (no remote shell).</li>
+          <li>SOCKS proxy (-D) supports browser/system proxy at <code>127.0.0.1:PORT</code>.</li>
+        </ul>
+      </details>
+    </div>
+
+    <div class="section card">
+      <h3>Quick test presets <span class="tag">smoke tests</span></h3>
+      <div class="row">
+        <button class="btn" onclick="loadPreset(1)">Preset 1: single hop -L</button>
+        <button class="btn" onclick="loadPreset(2)">Preset 2: 2 jumps -L</button>
+        <button class="btn" onclick="loadPreset(3)">Preset 3: -R remote</button>
+        <button class="btn" onclick="loadPreset(4)">Preset 4: -D SOCKS</button>
+        <button class="btn" onclick="runTests()">Run smoke tests</button>
+      </div>
+      <div id="tests" class="hint" style="margin-top:.6rem"></div>
+    </div>
+  </div>
+
+<script>
+function el(id){return document.getElementById(id)}
+function esc(s){return s.replace(/[<>&]/g, m=>({"<":"&lt;", ">":"&gt;", "&":"&amp;"}[m]))}
+function codeBlock(title, tags, body){
+  const id = `cb_${Math.random().toString(36).slice(2)}`
+  return `
+  <div class="section card">
+    <h3>${title} ${tags.map(t=>`<span class=tag>${t}</span>`).join(' ')}</h3>
+    <a class="copy" data-copy="${id}">📋 Copy</a>
+    <pre class="out"><code id="${id}">${esc(body)}</code></pre>
+  </div>`
+}
+
+function parseHost(line){
+  // Accept: user@host:port  | host:port  | user@host
+  line = line.trim()
+  if(!line) return null
+  let user=null, host=null, port=22
+  const at = line.indexOf('@')
+  if(at!==-1){ user = line.slice(0,at); line = line.slice(at+1) }
+  const colon = line.lastIndexOf(':')
+  if(colon!==-1){
+    const before = line.slice(0,colon)
+    const after = line.slice(colon+1)
+    const p = parseInt(after,10)
+    if(!isNaN(p)){ host=before; port=p } else { host=line }
+  }
+  if(!host){ host=line }
+  return {user,host,port}
+}
+
+function joinJumps(jumps){
+  return jumps.map(h=> (h.user?`${h.user}@`: '') + `${h.host}` + (h.port!==22?`:${h.port}`:'' ) ).join(',')
+}
+
+function baseTarget(h){
+  return (h.user?`${h.user}@`: '') + `${h.host}` + (h.port!==22?` -p ${h.port}`:'')
+}
+
+function generate(state){
+  const {hopsRaw, identity, fwdtype, localBind, remoteDest, options, reverseAddr} = state
+  const hops = hopsRaw.split(/\n+/).map(parseHost).filter(Boolean)
+  if(hops.length<1){ throw new Error('no hosts') }
+  const final = hops[hops.length-1]
+  const jumpers = hops.slice(0,-1)
+
+  const pj = joinJumps(jumpers)
+  const target = baseTarget(final)
+  const idArg = identity?` -i ${identity}`:''
+  const nt = ' -N -T'
+
+  const [lbHost, lbPortRaw] = (localBind.includes(':')? localBind.split(':'): ['127.0.0.1','8080'])
+  const lbPort = lbPortRaw || '8080'
+
+  const sshBase = `ssh${idArg}` + (pj?` -J ${pj}`:'') + `${nt} ${options}`
+  const cmdL = `${sshBase} -L ${lbHost}:${lbPort}:${remoteDest} ${target}`.trim().replace(/\s+/g,' ')
+  const cmdR = `${sshBase} -R ${reverseAddr}:${lbPort}:${remoteDest} ${target}`.trim().replace(/\s+/g,' ')
+  const cmdD = `${sshBase} -D ${lbHost}:${lbPort} ${target}`.trim().replace(/\s+/g,' ')
+
+  const autosCmd = `AUTOSSH_GATETIME=0 AUTOSSH_PORT=0 autossh${idArg}` + (pj?` -J ${pj}`:'') + `${nt} ${options} ` +
+                   (fwdtype==='R'?`-R ${reverseAddr}:${lbPort}:${remoteDest}`: fwdtype==='D'?`-D ${lbHost}:${lbPort}`:`-L ${lbHost}:${lbPort}:${remoteDest}`) +
+                   ` ${target}`
+
+  const scp = `scp` + (pj?` -o ProxyJump=${pj}`:'') + (identity?` -i ${identity}`:'') + ` ./file ${(final.user?final.user+'@':'') + final.host} :`.replace(' :',':')
+  const sftp = `sftp` + (pj?` -o ProxyJump=${pj}`:'') + (identity?` -i ${identity}`:'') + ` ${(final.user?final.user+'@':'') + final.host}`
+
+  const hostAlias = final.host.replace(/[^a-zA-Z0-9_-]/g,'-')
+  const cfg = [
+    `Host ${hostAlias}`,
+    `  HostName ${final.host}`,
+    final.user?`  User ${final.user}`:'',
+    final.port!==22?`  Port ${final.port}`:'',
+    identity?`  IdentityFile ${identity}`:'',
+    pj?`  ProxyJump ${pj}`:'',
+    `  ServerAliveInterval 30`,
+    `  ExitOnForwardFailure yes`,
+    '',
+    `# To start a tunnel:`,
+    `# ssh -N -T -L ${lbHost}:${lbPort}:${remoteDest} ${hostAlias}`,
+    `# ssh -N -T -R ${reverseAddr}:${lbPort}:${remoteDest} ${hostAlias}`,
+    `# ssh -N -T -D ${lbHost}:${lbPort} ${hostAlias}`,
+  ].filter(Boolean).join('\n')
+
+  const revBack = [
+    '# Run this on the FINAL host to reach a service on your local machine:',
+    `ssh${idArg} ${nt} ${options} -R ${reverseAddr}:${lbPort}:${remoteDest} ` +
+    (pj?`-J ${jumpers.slice().reverse().map(h=> (h.user?`${h.user}@`:'') + h.host + (h.port!==22?`:${h.port}`:'')).join(',')} `:'') +
+    baseTarget(hops[0])
+  ].join('\n')
+
+  return {cmdL, cmdR, cmdD, autosCmd, scp, sftp, cfg, revBack, pj, hops}
+}
+
+function build(){
+  const hopsRaw = (el('hops').value.trim() || `bastion
+app-gateway:2222
+target.internal`)
+  const identity = el('identity').value.trim()
+  const fwdtype = el('fwdtype').value
+  const localBind = el('localBind').value.trim() || '127.0.0.1:8080'
+  const remoteDest = el('remoteDest').value.trim() || '127.0.0.1:80'
+  const options = el('options').value.trim() || '-o ServerAliveInterval=30 -o ExitOnForwardFailure=yes'
+  const reverseAddr = el('reverseAddr').value.trim() || 'localhost'
+
+  const blocks = []
+  let g
+  try{
+    g = generate({hopsRaw, identity, fwdtype, localBind, remoteDest, options, reverseAddr})
+  }catch(e){
+    el('output').innerHTML = codeBlock('Error', ['parse'], e.message)
+    return
+  }
+
+  blocks.push(codeBlock('Local forward (source → target)', ['-L','ProxyJump'], g.cmdL))
+  blocks.push(codeBlock('Remote forward (target → source)', ['-R'], g.cmdR))
+  if(fwdtype==='D') blocks.push(codeBlock('Dynamic SOCKS proxy', ['-D','ProxyJump'], g.cmdD))
+  blocks.push(codeBlock('Persistent tunnel with autossh', ['autossh'], g.autosCmd))
+  blocks.push(codeBlock('scp / sftp through chain', ['-J'], g.scp + '\n' + g.sftp))
+  blocks.push(codeBlock('~/.ssh/config snippet', ['ProxyJump','friendly alias'], g.cfg))
+  blocks.push(codeBlock('Reverse-initiate from final host (example)', ['-R','target→source'], g.revBack))
+
+  el('output').innerHTML = blocks.join('\n')
+  document.querySelectorAll('[data-copy]').forEach(a=>{
+    a.onclick = async (e)=>{
+      const id = e.currentTarget.getAttribute('data-copy')
+      const text = document.getElementById(id).innerText
+      try{ await navigator.clipboard.writeText(text); a.textContent='✅ Copied'; setTimeout(()=>a.textContent='📋 Copy', 1200)}catch(err){ a.textContent='❌ Copy failed'; setTimeout(()=>a.textContent='📋 Copy', 1200)}
+    }
+  })
+}
+
+function loadPreset(n){
+  if(n===1){
+    el('hops').value = 'target.example.com:22'
+    el('fwdtype').value = 'L'
+    el('localBind').value = '127.0.0.1:8080'
+    el('remoteDest').value = '127.0.0.1:80'
+  }
+  if(n===2){
+    el('hops').value = 'alice@bastion:22\nbob@gateway:2222\nsvc@app.internal:22'
+    el('fwdtype').value = 'L'
+    el('localBind').value = '127.0.0.1:15432'
+    el('remoteDest').value = '127.0.0.1:5432'
+  }
+  if(n===3){
+    el('hops').value = 'bastion\napp.internal'
+    el('fwdtype').value = 'R'
+    el('localBind').value = '127.0.0.1:3000'
+    el('remoteDest').value = '127.0.0.1:3000'
+    el('reverseAddr').value = '0.0.0.0'
+  }
+  if(n===4){
+    el('hops').value = 'jump1\njump2\nfinal.internal'
+    el('fwdtype').value = 'D'
+    el('localBind').value = '127.0.0.1:1080'
+  }
+  build()
+}
+
+function runTests(){
+  const results = []
+  function ok(name, cond, msg){ results.push({name, ok:!!cond, msg}) }
+
+  // Test 1: single hop -L produces no -J and contains -L
+  let g = generate({hopsRaw:'final:22', identity:'', fwdtype:'L', localBind:'127.0.0.1:8080', remoteDest:'127.0.0.1:80', options:'-o A=1', reverseAddr:'localhost'})
+  ok('single hop -L has -L', g.cmdL.includes(' -L 127.0.0.1:8080:127.0.0.1:80'), g.cmdL)
+  ok('single hop -L no -J', !g.cmdL.includes(' -J '), g.cmdL)
+
+  // Test 2: two jumps adds -J chain
+  g = generate({hopsRaw:'a\nb\nfinal', identity:'~/.ssh/id_ed25519', fwdtype:'L', localBind:'127.0.0.1:8080', remoteDest:'127.0.0.1:80', options:'-o A=1', reverseAddr:'localhost'})
+  ok('two jumps has -J', g.cmdL.includes(' -J a,b '), g.cmdL)
+
+  // Test 3: -R uses reverseAddr
+  g = generate({hopsRaw:'jump\nfinal', identity:'', fwdtype:'R', localBind:'127.0.0.1:5000', remoteDest:'127.0.0.1:5000', options:'-o A=1', reverseAddr:'0.0.0.0'})
+  ok('-R uses reverseAddr', g.cmdR.includes(' -R 0.0.0.0:5000:127.0.0.1:5000'), g.cmdR)
+
+  // Test 4: -D builds SOCKS
+  g = generate({hopsRaw:'x\nfinal', identity:'', fwdtype:'D', localBind:'127.0.0.1:1080', remoteDest:'irrelevant:0', options:'-o A=1', reverseAddr:'localhost'})
+  ok('-D present', g.cmdD.includes(' -D 127.0.0.1:1080 '), g.cmdD)
+
+  const pass = results.every(r=>r.ok)
+  const html = results.map(r=>`<div>${r.ok? '✅' : '❌'} <b>${r.name}</b> — <code>${esc(r.msg)}</code></div>`).join('') +
+               `<div style="margin-top:.4rem" class="${pass?'tests-pass':'tests-fail'}">${pass? 'All smoke tests passed' : 'Some tests failed — see details above'}</div>`
+  el('tests').innerHTML = html
+}
+
+el('build').addEventListener('click', build)
+
+el('reset').addEventListener('click', ()=>{
+  ['hops','identity','localBind','remoteDest','options','reverseAddr'].forEach(id=>el(id).value='')
+  el('fwdtype').value='L'
+  el('autossh').value='off'
+  el('output').innerHTML=''
+  el('tests').innerHTML=''
+})
+
+// Build defaults initially for quick demo
+build()
+</script>
+</body>
+</html>

@@ -6,3 +6,7 @@ For starters one I need more often than I'd like to admit, as 99% of the time I'
 Try this: https://mahespth.github.io/linux-command-helpers/lvm-helper.html
 
 or for RAID This https://mahespth.github.io/linux-command-helpers/raid-mdadm.html
+
+or for SSH Port forwarding https://mahespth.github.io/linux-command-helpers/ssh_port_fowarding.html
+
+
